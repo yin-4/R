@@ -1,0 +1,113 @@
+---
+title: "Statistics Mentorship Program"
+output: html_document
+date: "2026-04-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Load library/packages - need to run this every time you open RStudio
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+```
+
+## Reading file for your project
+
+```{r}
+co2 <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Raw/owid-co2-data.csv")
+
+energy <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Raw/owid-energy-data.csv")
+```
+
+#Saving your working dataset 
+
+```{r}
+write.csv(df_joinedW, file = "/Users/Nyx/Onedrive/Desktop/R/Datasets/working/df_joinedW.csv")
+```
+
+## Join-Clean Dataset
+
+```{r}
+energy_select <- energy |>
+  select(
+    country, year,
+    renewables_share_energy,
+    fossil_share_energy,
+    renewables_share_elec,
+    renewables_consumption,
+    low_carbon_share_energy
+  )
+
+#I need to derive gdp_per_capta = gdp / population after the join
+co2_select <- co2 |>
+  select(
+    country, year, iso_code,
+    co2_per_capita,
+    co2,
+    gdp,
+    population
+  )
+
+df_joined <- co2_select |>
+  left_join(energy_select, by = c("country", "year"))
+
+cat("Joined dataset: ", nrow(df_joined), "rows", ncol(df_joined), "columns\n")
+```
+
+## What do we have?
+
+```{r}
+dim(df_joined)       # rows x columns
+colnames(df_joined)  # variable names
+glimpse(df_joined)   # column types -- are they correct?
+head(df_joined)      # first 6 rows
+```
+
+## Are there missing values?
+
+```{r check-missing}
+# summary() shows NA counts for numeric columns
+summary(df_joined)
+
+# Count NAs in every column at once
+colSums(is.na(df_joined))
+```
+
+## Do the categories look clean?
+
+```{r check-categories}
+table(df_joined$country)            # 
+```
+
+## Filter 2020-2022 & countries with limited data
+
+```{r}
+df_joinedW <- df_joined |>
+  filter(year >= 2020 & year <= 2022,
+         !country %in% c("Christmas Island", "Least developed countries (Jones et al.)","Kuwaiti Oil Fires (GCP)", "Kuwaiti Oil Fires", "OECD (Jones et al.)", "Ryukyu Islands", "Ryukyu Islands (GCP)" )) #monaco, san marino, vatican only have population data
+```
