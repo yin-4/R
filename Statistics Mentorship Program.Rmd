@@ -1,0 +1,193 @@
+---
+title: "Statistics Mentorship Program"
+output: html_document
+date: "2026-04-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Load library/packages - need to run this every time you open RStudio
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+```
+
+## Reading file for your project
+
+```{r}
+co2 <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Raw/owid-co2-data.csv")
+
+energy <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Raw/owid-energy-data.csv")
+
+df_joined <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Raw/df_joined.csv")
+
+df_joinedW <-read.csv("/Users/Nyx/Onedrive/Desktop/R/Datasets/Working/df_joinedW.csv")
+```
+
+#Saving your working dataset 
+
+```{r}
+write.csv(df_joinedW, file = "/Users/Nyx/Onedrive/Desktop/R/Datasets/working/df_joinedW.csv")
+```
+
+## Join-Clean Dataset
+
+```{r}
+energy_select <- energy |>
+  select(
+    country, year,
+    renewables_share_energy,
+    fossil_share_energy,
+    renewables_share_elec,
+    renewables_consumption,
+    low_carbon_share_energy
+  )
+
+#I need to derive gdp_per_capta = gdp / population after the join
+co2_select <- co2 |>
+  select(
+    country, year, iso_code,
+    co2_per_capita,
+    co2,
+    gdp,
+    population
+  )
+
+df_joined <- co2_select |>
+  left_join(energy_select, by = c("country", "year"))
+
+cat("Joined dataset: ", nrow(df_joined), "rows", ncol(df_joined), "columns\n")
+```
+
+## What do we have?
+
+```{r}
+dim(df_joined)       # rows x columns
+colnames(df_joined)  # variable names
+glimpse(df_joined)   # column types -- are they correct?
+head(df_joined)      # first 6 rows
+```
+
+## Are there missing values?
+
+```{r check-missing}
+# summary() shows NA counts for numeric columns
+summary(df_joined)
+
+# Count NAs in every column at once
+colSums(is.na(df_joined))
+```
+
+## Do the categories look clean?
+
+```{r check-categories}
+table(df_joined$co2_per_capita)
+```
+
+## Filter 2020-2022 & countries with limited data
+
+```{r}
+df_joinedW <- df_joined |>
+  filter(year >= 2020 & year <= 2022,
+         !country %in% c("Christmas Island", "Least developed countries (Jones et al.)","Kuwaiti Oil Fires (GCP)", "Kuwaiti Oil Fires", "OECD (Jones et al.)", "Ryukyu Islands", "Ryukyu Islands (GCP)" )) #monaco, san marino, vatican only have population data
+```
+
+## The basic problem (NA)
+
+```{r na-case1-correct}
+# CORRECT -- na.rm = TRUE, and always report how many were excluded
+df_joinedW %>%
+  group_by(country) %>%
+  summarise(
+    n_total         = n(),
+    n_missing       = sum(is.na(co2_per_capita)),
+    percent_missing = round(n_missing / n_total * 100, 1),
+    mean_co2        = mean(co2_per_capita, na.rm = TRUE),
+    sd_co2          = sd(co2_per_capita,   na.rm = TRUE)
+  )
+```
+
+## Dropping NAs carelessly creates a false result
+
+Imagine the 8 missing BDNF values all come from the AD patients
+whose samples failed quality control. If we filter out NA rows, we silently
+remove those patients. The remaining AD group now contains only milder cases,
+and any comparison to controls will *underestimate* the true difference.
+
+```{r na-case2}
+set.seed(99)
+# Simulate bias: remove lowest CO2 values from one country
+df_biased <- df_joinedW
+target_rows <- which(df_biased$country == "Canada" & !is.na(df_biased$co2_per_capita))
+# pick lowest values
+lowest_vals <- target_rows[order(df_biased$co2_per_capita[target_rows])][1:1]
+# turn them into NA
+df_biased$co2_per_capita[lowest_vals] <- NA
+
+# biased: drop NA rows completely
+biased_result <- df_biased %>%
+  filter(!is.na(co2_per_capita)) %>%
+  group_by(country) %>%
+  summarise(
+    n_analysed = n(),
+    mean_co2   = round(mean(co2_per_capita), 3)
+  )
+
+
+# unbiased: keep data, just ignore NA in calculation
+unbiased_result <- df_joinedW %>%
+  group_by(country) %>%
+  summarise(
+    n_analysed = sum(!is.na(co2_per_capita)),
+    mean_co2   = round(mean(co2_per_capita, na.rm = TRUE), 3)
+  )
+
+cat("--- Biased (rows silently removed) ---\n")
+print(biased_result)
+cat("\n--- Unbiased (all rows accounted for) ---\n")
+print(unbiased_result)
+```
+
+## Percent missing from each column
+
+```{r drop-column-check}
+# Check percentage missing per column
+data.frame(
+  column      = colnames(df_joinedW),
+  n_missing   = colSums(is.na(df_joinedW)),
+  pct_missing = round(colSums(is.na(df_joinedW)) / nrow(df_joinedW) * 100, 1)
+)
+```
+
+**Practical guideline:**
+
+| % missing in a column | Recommended action |
+|------------------------|-------------------|
+| Less than 10%  | Use `na.rm = TRUE`; report the count |
+| 10% to 40%     | Be cautious; check if missingness is random; report it |
+| More than 40%  | Consider dropping the column entirely |
